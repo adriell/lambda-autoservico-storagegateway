@@ -1,77 +1,64 @@
-import os
-import json
 import boto3
-import urllib.request
-import http.client
-import urllib.parse as urlparse
-from urllib.parse import parse_qs
-from urllib.parse import urlsplit
-
-
-ec2 = boto3.client('ec2')
-stg = boto3.client('storagegateway')
+import json
+import sys
+import urllib3
+from src.activateStorageGateway import get_gateway_activation_key
+from src.activateStorageGateway import create_instance
+from src.activateStorageGateway import activate_gateway
 
 def lambda_handler(event, context):
+    print("SNS Event: " + json.dumps(event))
     
-    instance_ip = create_instance(event)
+    event = json.loads(event['Records'][0]['Sns']['Message'])
     
-    key = get_gateway_activation_key(instance_ip)
-    
-    result = activate_gateway(key)
-    
-    return key
+    print("Lambda Event: " + json.dumps(event))
 
-def activate_gateway(key):
+    try:
+        type = event['RequestType']
+        bucket = event['ResourceProperties']['BucketName']
+        accountId = event['ResourceProperties']['AccountID']
+        envName = event['ResourceProperties']['EnvName']
+        ipSource = event['ResourceProperties']['IP']
     
-    response = stg.activate_gateway(
-        ActivationKey=key,
-        GatewayName="StorageGateway",
-        GatewayTimezone="GMT+3:00",
-        GatewayRegion="us-east-1",
-        GatewayType="FILE_S3",
-        Tags=[
-            {
-                'Key': 'Name',
-                'Value': 'StorageGateway'
-            }
-        ]
-    )
+        instance_ip = create_instance(event)
     
-    return response
+        key = get_gateway_activation_key(instance_ip)
+    
+        result = activate_gateway(key)
 
-def get_gateway_activation_key(instance_ip):
+        responseStatus = 'SUCCESS'
+        responseData = {'BucketName': bucket, 'AccountID':accountId}
+        sendResponse(event, context, responseStatus, responseData)  
+        
+        
 
-   conn = http.client.HTTPConnection(instance_ip)
-   conn.request("GET","/?activationRegion=us-east-1")
-   response = conn.getresponse()
-   parsed = urlparse.urlparse(response.msg["Location"])
-   result = parse_qs(parsed.query)["activationKey"]
-   print(response.msg["Location"])
-  
-   return result[0]
+        return responseStatus
+    except:
+        print("Error:", sys.exc_info()[0])
+        responseStatus = 'FAILED'
+        responseData = {}
+        sendResponse(event, context, responseStatus, responseData)
 
-def create_instance(self):
-    con = ec2.run_instances(
-        InstanceType="t2.micro",
-        MaxCount=1,
-        MinCount=1,
-        ImageId="ami-03ae10098c64188a7",
-        SecurityGroupIds=[
-            "sg-123456"
-        ],
-        SubnetId="subnet-123456",
-        TagSpecifications=[
-            {
-                'ResourceType':'instance',
-                'Tags': [
-                    {
-                        'Key':'Name',
-                        'Value':'StorageGateway'
-                    }
-                ]
-            }
-        ]
-    )
-    instance = con['Instances'][0]['PrivateIpAddress']
+        
+def sendResponse(event, context, responseStatus, responseData):
+    data = json.dumps({
+      'Status': responseStatus,
+      'Reason': 'See the details in CloudWatch Log Stream: ' + context.log_stream_name,
+      'PhysicalResourceId': context.log_stream_name,
+      'StackId': event['StackId'],
+      'RequestId': event['RequestId'],
+      'LogicalResourceId': event['LogicalResourceId'],
+      'Data': responseData
+    })
+    
+    http = urllib3.PoolManager()
+    encoded_data = json.dumps(data).encode('utf-8')
+    req_headers = {'Content-Type':''}
+    r = http.request('PUT',event['ResponseURL'], headers=req_headers, body=data)
 
-    return instance
+    #opener = urllib3.build_opener(urllib3.HTTPHandler)
+    #request = urllib3.Request(url=event['ResponseURL'], data=data)
+    #request.add_header('Content-Type', '')
+    #request.get_method = lambda: 'PUT'
+    #url = opener.open(request)
+
