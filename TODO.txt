@@ -1,0 +1,9 @@
+# TO DO LIST 
+- CreateEC2
+- CreateActivationKey
+- CreateCache
+- Bug da Ativação do Gateway
+- Bug do ActivationKey
+- CodeSwitchRole
+- CreateNFSFileShare
+- CreateCheckFileShareInGateway
